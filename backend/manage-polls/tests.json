@@ -1,0 +1,23 @@
+{
+  "tests": [
+    {
+      "name": "Create new poll",
+      "method": "POST",
+      "path": "/",
+      "headers": {
+        "X-User-Id": "1",
+        "X-User-Role": "owner"
+      },
+      "body": {
+        "title": "Test Poll",
+        "description": "Test Description",
+        "options": ["Option 1", "Option 2", "Option 3"]
+      },
+      "expectedStatus": 201,
+      "expectedBody": {
+        "success": true
+      },
+      "bodyMatcher": "partial"
+    }
+  ]
+}

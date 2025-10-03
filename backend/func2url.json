@@ -1,1 +1,4 @@
-{}
+{
+  "auth": "https://functions.poehali.dev/b0683ce4-5fe4-49f2-b3d0-e41556b6a5e7",
+  "manage-polls": "https://functions.poehali.dev/40bcc29c-0772-4614-813b-079d0b6f24f3"
+}

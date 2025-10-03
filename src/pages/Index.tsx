@@ -6,6 +6,9 @@ import { Badge } from '@/components/ui/badge';
 import { Tabs, TabsContent, TabsList, TabsTrigger } from '@/components/ui/tabs';
 import { Avatar, AvatarFallback } from '@/components/ui/avatar';
 import Icon from '@/components/ui/icon';
+import AuthModal from '@/components/AuthModal';
+import CreatePollModal from '@/components/CreatePollModal';
+import { useToast } from '@/hooks/use-toast';
 
 interface PollOption {
   id: number;
@@ -20,10 +23,12 @@ interface Poll {
   status: string;
   options: PollOption[];
   totalVotes: number;
+  created_by?: number;
 }
 
 interface User {
-  email: string;
+  id: number;
+  phone: string;
   name: string;
   role: string;
 }
@@ -31,99 +36,294 @@ interface User {
 const Index = () => {
   const [polls, setPolls] = useState<Poll[]>([]);
   const [activeTab, setActiveTab] = useState('home');
-  const [currentUser] = useState<User>({
-    email: 'snovi6423@gmail.com',
-    name: 'Owner',
-    role: 'owner'
-  });
+  const [currentUser, setCurrentUser] = useState<User | null>(null);
+  const [authModalOpen, setAuthModalOpen] = useState(false);
+  const [createPollModalOpen, setCreatePollModalOpen] = useState(false);
+  const [loading, setLoading] = useState(false);
+  const { toast } = useToast();
 
+  // Check authentication on page load
   useEffect(() => {
-    const mockPolls: Poll[] = [
-      {
-        id: 1,
-        title: 'Любимый язык программирования?',
-        description: 'Выберите ваш любимый язык для веб-разработки',
-        status: 'active',
-        options: [
-          { id: 1, option_text: 'TypeScript', votes_count: 45 },
-          { id: 2, option_text: 'Python', votes_count: 38 },
-          { id: 3, option_text: 'JavaScript', votes_count: 52 },
-          { id: 4, option_text: 'Go', votes_count: 23 }
-        ],
-        totalVotes: 158
-      },
-      {
-        id: 2,
-        title: 'Лучшее время для встреч команды?',
-        description: 'Когда вам удобнее проводить командные встречи?',
-        status: 'active',
-        options: [
-          { id: 5, option_text: 'Утро (9:00-11:00)', votes_count: 28 },
-          { id: 6, option_text: 'День (14:00-16:00)', votes_count: 42 },
-          { id: 7, option_text: 'Вечер (18:00-20:00)', votes_count: 19 }
-        ],
-        totalVotes: 89
-      },
-      {
-        id: 3,
-        title: 'Новая функция платформы',
-        description: 'Какую функцию добавить в первую очередь?',
-        status: 'active',
-        options: [
-          { id: 8, option_text: 'Экспорт результатов в Excel', votes_count: 31 },
-          { id: 9, option_text: 'Анонимное голосование', votes_count: 47 },
-          { id: 10, option_text: 'Голосование с комментариями', votes_count: 25 },
-          { id: 11, option_text: 'Автоматическое закрытие голосований', votes_count: 18 }
-        ],
-        totalVotes: 121
+    const storedUser = localStorage.getItem('user');
+    if (storedUser) {
+      try {
+        const user = JSON.parse(storedUser);
+        setCurrentUser(user);
+      } catch (error) {
+        console.error('Failed to parse user from localStorage', error);
+        localStorage.removeItem('user');
+        localStorage.removeItem('auth_token');
       }
-    ];
-    setPolls(mockPolls);
+    }
   }, []);
 
-  const PollCard = ({ poll }: { poll: Poll }) => (
-    <Card className="hover:shadow-lg transition-all duration-300 animate-scale-in border-2 hover:border-primary/50">
-      <CardHeader>
-        <div className="flex items-start justify-between">
-          <div className="flex-1">
-            <CardTitle className="text-xl mb-2 bg-gradient-to-r from-primary to-secondary bg-clip-text text-transparent">
-              {poll.title}
-            </CardTitle>
-            <CardDescription>{poll.description}</CardDescription>
-          </div>
-          <Badge variant="secondary" className="bg-gradient-to-r from-primary to-secondary text-white">
-            {poll.status === 'active' ? 'Активно' : 'Завершено'}
-          </Badge>
-        </div>
-      </CardHeader>
-      <CardContent className="space-y-4">
-        {poll.options.map((option) => {
-          const percentage = poll.totalVotes > 0 ? (option.votes_count / poll.totalVotes) * 100 : 0;
-          return (
-            <div key={option.id} className="space-y-2 animate-fade-in">
-              <div className="flex justify-between items-center">
-                <span className="text-sm font-medium">{option.option_text}</span>
-                <span className="text-sm text-muted-foreground">{option.votes_count} голосов</span>
-              </div>
-              <div className="relative">
-                <Progress value={percentage} className="h-3" />
-                <span className="absolute right-2 top-1/2 -translate-y-1/2 text-xs font-bold text-primary-foreground mix-blend-difference">
-                  {percentage.toFixed(0)}%
-                </span>
-              </div>
+  // Load polls from API
+  const loadPolls = async () => {
+    setLoading(true);
+    try {
+      const response = await fetch('https://functions.poehali.dev/0b3cf8f7-e77c-4ff3-9d11-4aae9401ce7c');
+      const data = await response.json();
+      
+      if (data.success && data.polls) {
+        // Transform polls to include totalVotes
+        const transformedPolls = data.polls.map((poll: any) => ({
+          ...poll,
+          totalVotes: poll.options.reduce((sum: number, opt: PollOption) => sum + opt.votes_count, 0)
+        }));
+        setPolls(transformedPolls);
+      }
+    } catch (error) {
+      toast({
+        title: 'Ошибка',
+        description: 'Не удалось загрузить голосования',
+        variant: 'destructive'
+      });
+    } finally {
+      setLoading(false);
+    }
+  };
+
+  // Load polls on component mount
+  useEffect(() => {
+    loadPolls();
+  }, []);
+
+  // Vote on poll
+  const handleVote = async (pollId: number, optionId: number) => {
+    if (!currentUser) {
+      toast({
+        title: 'Требуется авторизация',
+        description: 'Войдите в систему для голосования',
+        variant: 'destructive'
+      });
+      setAuthModalOpen(true);
+      return;
+    }
+
+    try {
+      const response = await fetch('https://functions.poehali.dev/0b3cf8f7-e77c-4ff3-9d11-4aae9401ce7c', {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json'
+        },
+        body: JSON.stringify({
+          poll_id: pollId,
+          option_id: optionId,
+          user_id: currentUser.id
+        })
+      });
+
+      const data = await response.json();
+      
+      if (data.success) {
+        toast({
+          title: 'Успешно!',
+          description: 'Ваш голос учтен'
+        });
+        // Reload polls to get updated counts
+        loadPolls();
+      } else {
+        toast({
+          title: 'Ошибка',
+          description: data.error || 'Не удалось проголосовать',
+          variant: 'destructive'
+        });
+      }
+    } catch (error) {
+      toast({
+        title: 'Ошибка',
+        description: 'Проблема с подключением',
+        variant: 'destructive'
+      });
+    }
+  };
+
+  // Delete poll (owner only)
+  const handleDeletePoll = async (pollId: number) => {
+    if (!currentUser || currentUser.role !== 'owner') {
+      toast({
+        title: 'Доступ запрещен',
+        description: 'Только владелец может удалять голосования',
+        variant: 'destructive'
+      });
+      return;
+    }
+
+    if (!confirm('Вы уверены, что хотите удалить это голосование?')) {
+      return;
+    }
+
+    try {
+      const response = await fetch('https://functions.poehali.dev/40bcc29c-0772-4614-813b-079d0b6f24f3', {
+        method: 'DELETE',
+        headers: {
+          'Content-Type': 'application/json',
+          'X-User-Id': currentUser.id.toString(),
+          'X-User-Role': currentUser.role
+        },
+        body: JSON.stringify({
+          poll_id: pollId
+        })
+      });
+
+      const data = await response.json();
+      
+      if (data.success) {
+        toast({
+          title: 'Успешно!',
+          description: 'Голосование удалено'
+        });
+        // Reload polls
+        loadPolls();
+      } else {
+        toast({
+          title: 'Ошибка',
+          description: data.error || 'Не удалось удалить голосование',
+          variant: 'destructive'
+        });
+      }
+    } catch (error) {
+      toast({
+        title: 'Ошибка',
+        description: 'Проблема с подключением',
+        variant: 'destructive'
+      });
+    }
+  };
+
+  // Handle authentication success
+  const handleAuthSuccess = (user: User) => {
+    setCurrentUser(user);
+    loadPolls(); // Reload polls after login
+  };
+
+  // Handle create poll success
+  const handleCreatePollSuccess = () => {
+    loadPolls(); // Reload polls after creating new one
+  };
+
+  // Handle logout
+  const handleLogout = () => {
+    localStorage.removeItem('user');
+    localStorage.removeItem('auth_token');
+    setCurrentUser(null);
+    toast({
+      title: 'Выход выполнен',
+      description: 'Вы вышли из системы'
+    });
+  };
+
+  // Open create poll modal
+  const handleOpenCreatePoll = () => {
+    if (!currentUser) {
+      toast({
+        title: 'Требуется авторизация',
+        description: 'Войдите в систему для создания голосования',
+        variant: 'destructive'
+      });
+      setAuthModalOpen(true);
+      return;
+    }
+    setCreatePollModalOpen(true);
+  };
+
+  const PollCard = ({ poll }: { poll: Poll }) => {
+    const [selectedOption, setSelectedOption] = useState<number | null>(null);
+    const [isVoting, setIsVoting] = useState(false);
+
+    const handleVoteClick = async () => {
+      if (selectedOption === null) {
+        toast({
+          title: 'Выберите вариант',
+          description: 'Пожалуйста, выберите один из вариантов ответа',
+          variant: 'destructive'
+        });
+        return;
+      }
+
+      setIsVoting(true);
+      await handleVote(poll.id, selectedOption);
+      setIsVoting(false);
+      setSelectedOption(null);
+    };
+
+    return (
+      <Card className="hover:shadow-lg transition-all duration-300 animate-scale-in border-2 hover:border-primary/50">
+        <CardHeader>
+          <div className="flex items-start justify-between">
+            <div className="flex-1">
+              <CardTitle className="text-xl mb-2 bg-gradient-to-r from-primary to-secondary bg-clip-text text-transparent">
+                {poll.title}
+              </CardTitle>
+              <CardDescription>{poll.description}</CardDescription>
             </div>
-          );
-        })}
-        <div className="flex justify-between items-center pt-4 border-t">
-          <span className="text-sm text-muted-foreground">Всего голосов: {poll.totalVotes}</span>
-          <Button className="bg-gradient-to-r from-primary to-secondary hover:opacity-90 text-white">
-            <Icon name="Vote" size={16} className="mr-2" />
-            Голосовать
-          </Button>
-        </div>
-      </CardContent>
-    </Card>
-  );
+            <div className="flex gap-2">
+              <Badge variant="secondary" className="bg-gradient-to-r from-primary to-secondary text-white">
+                {poll.status === 'active' ? 'Активно' : 'Завершено'}
+              </Badge>
+              {currentUser?.role === 'owner' && (
+                <Button
+                  variant="destructive"
+                  size="sm"
+                  onClick={() => handleDeletePoll(poll.id)}
+                  className="h-6 px-2"
+                >
+                  <Icon name="Trash2" size={14} />
+                </Button>
+              )}
+            </div>
+          </div>
+        </CardHeader>
+        <CardContent className="space-y-4">
+          {poll.options.map((option) => {
+            const percentage = poll.totalVotes > 0 ? (option.votes_count / poll.totalVotes) * 100 : 0;
+            const isSelected = selectedOption === option.id;
+            
+            return (
+              <div 
+                key={option.id} 
+                className={`space-y-2 animate-fade-in cursor-pointer p-2 rounded-lg transition-colors ${
+                  isSelected ? 'bg-primary/10 border-2 border-primary' : 'hover:bg-muted/50'
+                }`}
+                onClick={() => setSelectedOption(option.id)}
+              >
+                <div className="flex justify-between items-center">
+                  <span className="text-sm font-medium">{option.option_text}</span>
+                  <span className="text-sm text-muted-foreground">{option.votes_count} голосов</span>
+                </div>
+                <div className="relative">
+                  <Progress value={percentage} className="h-3" />
+                  <span className="absolute right-2 top-1/2 -translate-y-1/2 text-xs font-bold text-primary-foreground mix-blend-difference">
+                    {percentage.toFixed(0)}%
+                  </span>
+                </div>
+              </div>
+            );
+          })}
+          <div className="flex justify-between items-center pt-4 border-t">
+            <span className="text-sm text-muted-foreground">Всего голосов: {poll.totalVotes}</span>
+            <Button 
+              className="bg-gradient-to-r from-primary to-secondary hover:opacity-90 text-white"
+              onClick={handleVoteClick}
+              disabled={isVoting || poll.status !== 'active'}
+            >
+              {isVoting ? (
+                <>
+                  <Icon name="Loader2" size={16} className="mr-2 animate-spin" />
+                  Голосование...
+                </>
+              ) : (
+                <>
+                  <Icon name="Vote" size={16} className="mr-2" />
+                  Голосовать
+                </>
+              )}
+            </Button>
+          </div>
+        </CardContent>
+      </Card>
+    );
+  };
 
   return (
     <div className="min-h-screen bg-gradient-to-br from-background via-background to-primary/5">
@@ -139,15 +339,31 @@ const Index = () => {
               </h1>
             </div>
             <div className="flex items-center space-x-4">
-              <Avatar>
-                <AvatarFallback className="bg-gradient-to-r from-primary to-secondary text-white">
-                  {currentUser.name.charAt(0)}
-                </AvatarFallback>
-              </Avatar>
-              <div className="hidden md:block">
-                <p className="text-sm font-medium">{currentUser.name}</p>
-                <Badge variant="outline" className="text-xs">{currentUser.role}</Badge>
-              </div>
+              {currentUser ? (
+                <>
+                  <Avatar className="cursor-pointer" onClick={() => setActiveTab('profile')}>
+                    <AvatarFallback className="bg-gradient-to-r from-primary to-secondary text-white">
+                      {currentUser.name.charAt(0).toUpperCase()}
+                    </AvatarFallback>
+                  </Avatar>
+                  <div className="hidden md:block">
+                    <p className="text-sm font-medium">{currentUser.name}</p>
+                    <Badge variant="outline" className="text-xs">{currentUser.role}</Badge>
+                  </div>
+                  <Button variant="outline" size="sm" onClick={handleLogout}>
+                    <Icon name="LogOut" size={16} className="mr-2" />
+                    Выход
+                  </Button>
+                </>
+              ) : (
+                <Button 
+                  className="bg-gradient-to-r from-primary to-secondary text-white hover:opacity-90"
+                  onClick={() => setAuthModalOpen(true)}
+                >
+                  <Icon name="LogIn" size={16} className="mr-2" />
+                  Войти
+                </Button>
+              )}
             </div>
           </div>
         </div>
@@ -176,10 +392,12 @@ const Index = () => {
               <Icon name="User" size={16} className="mr-2" />
               <span className="hidden sm:inline">Профиль</span>
             </TabsTrigger>
-            <TabsTrigger value="admin" className="data-[state=active]:bg-gradient-to-r data-[state=active]:from-primary data-[state=active]:to-secondary data-[state=active]:text-white">
-              <Icon name="Settings" size={16} className="mr-2" />
-              <span className="hidden sm:inline">Админ</span>
-            </TabsTrigger>
+            {currentUser?.role === 'owner' && (
+              <TabsTrigger value="admin" className="data-[state=active]:bg-gradient-to-r data-[state=active]:from-primary data-[state=active]:to-secondary data-[state=active]:text-white">
+                <Icon name="Settings" size={16} className="mr-2" />
+                <span className="hidden sm:inline">Админ</span>
+              </TabsTrigger>
+            )}
           </TabsList>
 
           <TabsContent value="home" className="space-y-6 animate-fade-in">
@@ -187,7 +405,12 @@ const Index = () => {
               <h2 className="text-3xl font-bold mb-4">Добро пожаловать на платформу голосований!</h2>
               <p className="text-lg opacity-90 mb-6">Создавайте голосования, участвуйте в опросах и следите за результатами в реальном времени</p>
               <div className="flex gap-4 flex-wrap">
-                <Button size="lg" variant="secondary" className="bg-white text-primary hover:bg-white/90">
+                <Button 
+                  size="lg" 
+                  variant="secondary" 
+                  className="bg-white text-primary hover:bg-white/90"
+                  onClick={handleOpenCreatePoll}
+                >
                   <Icon name="Plus" size={20} className="mr-2" />
                   Создать голосование
                 </Button>
@@ -229,11 +452,30 @@ const Index = () => {
 
             <div>
               <h3 className="text-2xl font-bold mb-4">Последние голосования</h3>
-              <div className="grid gap-6 md:grid-cols-2">
-                {polls.slice(0, 2).map((poll) => (
-                  <PollCard key={poll.id} poll={poll} />
-                ))}
-              </div>
+              {loading ? (
+                <div className="text-center py-12">
+                  <Icon name="Loader2" size={48} className="mx-auto animate-spin text-primary" />
+                  <p className="mt-4 text-muted-foreground">Загрузка голосований...</p>
+                </div>
+              ) : polls.length > 0 ? (
+                <div className="grid gap-6 md:grid-cols-2">
+                  {polls.slice(0, 2).map((poll) => (
+                    <PollCard key={poll.id} poll={poll} />
+                  ))}
+                </div>
+              ) : (
+                <div className="text-center py-12 text-muted-foreground">
+                  <Icon name="Vote" size={48} className="mx-auto mb-4 text-primary" />
+                  <p>Пока нет активных голосований</p>
+                  <Button 
+                    className="mt-4 bg-gradient-to-r from-primary to-secondary text-white"
+                    onClick={handleOpenCreatePoll}
+                  >
+                    <Icon name="Plus" size={16} className="mr-2" />
+                    Создать первое голосование
+                  </Button>
+                </div>
+              )}
             </div>
           </TabsContent>
 
@@ -241,16 +483,32 @@ const Index = () => {
             <div className="space-y-6">
               <div className="flex items-center justify-between">
                 <h2 className="text-3xl font-bold">Все голосования</h2>
-                <Button className="bg-gradient-to-r from-primary to-secondary text-white">
-                  <Icon name="Filter" size={16} className="mr-2" />
-                  Фильтры
+                <Button 
+                  className="bg-gradient-to-r from-primary to-secondary text-white"
+                  onClick={loadPolls}
+                  disabled={loading}
+                >
+                  <Icon name={loading ? "Loader2" : "RefreshCw"} size={16} className={`mr-2 ${loading ? 'animate-spin' : ''}`} />
+                  Обновить
                 </Button>
               </div>
-              <div className="grid gap-6 md:grid-cols-2 lg:grid-cols-2">
-                {polls.map((poll) => (
-                  <PollCard key={poll.id} poll={poll} />
-                ))}
-              </div>
+              {loading ? (
+                <div className="text-center py-12">
+                  <Icon name="Loader2" size={48} className="mx-auto animate-spin text-primary" />
+                  <p className="mt-4 text-muted-foreground">Загрузка голосований...</p>
+                </div>
+              ) : polls.length > 0 ? (
+                <div className="grid gap-6 md:grid-cols-2 lg:grid-cols-2">
+                  {polls.map((poll) => (
+                    <PollCard key={poll.id} poll={poll} />
+                  ))}
+                </div>
+              ) : (
+                <div className="text-center py-12 text-muted-foreground">
+                  <Icon name="Vote" size={48} className="mx-auto mb-4 text-primary" />
+                  <p>Нет доступных голосований</p>
+                </div>
+              )}
             </div>
           </TabsContent>
 
@@ -263,10 +521,31 @@ const Index = () => {
                 <CardDescription>Заполните форму для создания нового опроса</CardDescription>
               </CardHeader>
               <CardContent className="space-y-4">
-                <div className="text-center py-12 text-muted-foreground">
+                <div className="text-center py-12">
                   <Icon name="Plus" size={48} className="mx-auto mb-4 text-primary" />
-                  <p>Форма создания голосования</p>
-                  <p className="text-sm mt-2">Будет добавлена в следующей версии</p>
+                  {currentUser ? (
+                    <>
+                      <p className="text-muted-foreground mb-4">Нажмите кнопку ниже для создания голосования</p>
+                      <Button
+                        className="bg-gradient-to-r from-primary to-secondary text-white"
+                        onClick={handleOpenCreatePoll}
+                      >
+                        <Icon name="Plus" size={16} className="mr-2" />
+                        Создать голосование
+                      </Button>
+                    </>
+                  ) : (
+                    <>
+                      <p className="text-muted-foreground mb-4">Войдите в систему для создания голосования</p>
+                      <Button
+                        className="bg-gradient-to-r from-primary to-secondary text-white"
+                        onClick={() => setAuthModalOpen(true)}
+                      >
+                        <Icon name="LogIn" size={16} className="mr-2" />
+                        Войти
+                      </Button>
+                    </>
+                  )}
                 </div>
               </CardContent>
             </Card>
@@ -275,11 +554,23 @@ const Index = () => {
           <TabsContent value="results" className="animate-fade-in">
             <div className="space-y-6">
               <h2 className="text-3xl font-bold">Результаты голосований</h2>
-              <div className="grid gap-6">
-                {polls.map((poll) => (
-                  <PollCard key={poll.id} poll={poll} />
-                ))}
-              </div>
+              {loading ? (
+                <div className="text-center py-12">
+                  <Icon name="Loader2" size={48} className="mx-auto animate-spin text-primary" />
+                  <p className="mt-4 text-muted-foreground">Загрузка результатов...</p>
+                </div>
+              ) : polls.length > 0 ? (
+                <div className="grid gap-6">
+                  {polls.map((poll) => (
+                    <PollCard key={poll.id} poll={poll} />
+                  ))}
+                </div>
+              ) : (
+                <div className="text-center py-12 text-muted-foreground">
+                  <Icon name="BarChart" size={48} className="mx-auto mb-4 text-primary" />
+                  <p>Нет результатов для отображения</p>
+                </div>
+              )}
             </div>
           </TabsContent>
 
@@ -291,71 +582,130 @@ const Index = () => {
                 </CardTitle>
               </CardHeader>
               <CardContent className="space-y-6">
-                <div className="flex items-center space-x-4">
-                  <Avatar className="w-20 h-20">
-                    <AvatarFallback className="bg-gradient-to-r from-primary to-secondary text-white text-2xl">
-                      {currentUser.name.charAt(0)}
-                    </AvatarFallback>
-                  </Avatar>
-                  <div>
-                    <h3 className="text-xl font-bold">{currentUser.name}</h3>
-                    <p className="text-muted-foreground">{currentUser.email}</p>
-                    <Badge className="mt-2 bg-gradient-to-r from-primary to-secondary text-white">
-                      {currentUser.role.toUpperCase()}
-                    </Badge>
+                {currentUser ? (
+                  <>
+                    <div className="flex items-center space-x-4">
+                      <Avatar className="w-20 h-20">
+                        <AvatarFallback className="bg-gradient-to-r from-primary to-secondary text-white text-2xl">
+                          {currentUser.name.charAt(0).toUpperCase()}
+                        </AvatarFallback>
+                      </Avatar>
+                      <div>
+                        <h3 className="text-xl font-bold">{currentUser.name}</h3>
+                        <p className="text-muted-foreground">{currentUser.phone}</p>
+                        <Badge className="mt-2 bg-gradient-to-r from-primary to-secondary text-white">
+                          {currentUser.role.toUpperCase()}
+                        </Badge>
+                      </div>
+                    </div>
+                    <div className="grid gap-4 pt-4 border-t">
+                      <div className="flex justify-between">
+                        <span className="font-medium">Доступных голосований:</span>
+                        <span>{polls.length}</span>
+                      </div>
+                      <div className="flex justify-between">
+                        <span className="font-medium">ID пользователя:</span>
+                        <span>{currentUser.id}</span>
+                      </div>
+                    </div>
+                    <Button
+                      variant="outline"
+                      className="w-full"
+                      onClick={handleLogout}
+                    >
+                      <Icon name="LogOut" size={16} className="mr-2" />
+                      Выйти из системы
+                    </Button>
+                  </>
+                ) : (
+                  <div className="text-center py-12">
+                    <Icon name="User" size={48} className="mx-auto mb-4 text-primary" />
+                    <p className="text-muted-foreground mb-4">Войдите в систему для просмотра профиля</p>
+                    <Button
+                      className="bg-gradient-to-r from-primary to-secondary text-white"
+                      onClick={() => setAuthModalOpen(true)}
+                    >
+                      <Icon name="LogIn" size={16} className="mr-2" />
+                      Войти
+                    </Button>
                   </div>
-                </div>
-                <div className="grid gap-4 pt-4 border-t">
-                  <div className="flex justify-between">
-                    <span className="font-medium">Создано голосований:</span>
-                    <span>{polls.length}</span>
-                  </div>
-                  <div className="flex justify-between">
-                    <span className="font-medium">Участие в голосованиях:</span>
-                    <span>0</span>
-                  </div>
-                  <div className="flex justify-between">
-                    <span className="font-medium">Дата регистрации:</span>
-                    <span>03.10.2025</span>
-                  </div>
-                </div>
+                )}
               </CardContent>
             </Card>
           </TabsContent>
 
-          <TabsContent value="admin" className="animate-fade-in">
-            <Card>
-              <CardHeader>
-                <CardTitle className="text-2xl bg-gradient-to-r from-primary to-secondary bg-clip-text text-transparent flex items-center gap-2">
-                  <Icon name="Shield" size={24} />
-                  Панель администратора
-                </CardTitle>
-                <CardDescription>Управление платформой и пользователями</CardDescription>
-              </CardHeader>
-              <CardContent className="space-y-6">
-                <div className="grid gap-4 md:grid-cols-2">
-                  <Button variant="outline" className="h-24 flex-col gap-2 border-2 hover:border-primary">
-                    <Icon name="Users" size={32} className="text-primary" />
-                    Управление пользователями
-                  </Button>
-                  <Button variant="outline" className="h-24 flex-col gap-2 border-2 hover:border-primary">
-                    <Icon name="BarChart" size={32} className="text-primary" />
-                    Управление голосованиями
-                  </Button>
-                  <Button variant="outline" className="h-24 flex-col gap-2 border-2 hover:border-primary">
-                    <Icon name="Settings" size={32} className="text-primary" />
-                    Настройки платформы
-                  </Button>
-                  <Button variant="outline" className="h-24 flex-col gap-2 border-2 hover:border-primary">
-                    <Icon name="FileText" size={32} className="text-primary" />
-                    Отчеты и статистика
-                  </Button>
-                </div>
-              </CardContent>
-            </Card>
-          </TabsContent>
+          {currentUser?.role === 'owner' && (
+            <TabsContent value="admin" className="animate-fade-in">
+              <Card>
+                <CardHeader>
+                  <CardTitle className="text-2xl bg-gradient-to-r from-primary to-secondary bg-clip-text text-transparent flex items-center gap-2">
+                    <Icon name="Shield" size={24} />
+                    Панель администратора
+                  </CardTitle>
+                  <CardDescription>Управление платформой и пользователями</CardDescription>
+                </CardHeader>
+                <CardContent className="space-y-6">
+                  <div className="grid gap-4 md:grid-cols-2">
+                    <Button variant="outline" className="h-24 flex-col gap-2 border-2 hover:border-primary">
+                      <Icon name="Users" size={32} className="text-primary" />
+                      Управление пользователями
+                    </Button>
+                    <Button 
+                      variant="outline" 
+                      className="h-24 flex-col gap-2 border-2 hover:border-primary"
+                      onClick={() => setActiveTab('polls')}
+                    >
+                      <Icon name="BarChart" size={32} className="text-primary" />
+                      Управление голосованиями
+                    </Button>
+                    <Button variant="outline" className="h-24 flex-col gap-2 border-2 hover:border-primary">
+                      <Icon name="Settings" size={32} className="text-primary" />
+                      Настройки платформы
+                    </Button>
+                    <Button 
+                      variant="outline" 
+                      className="h-24 flex-col gap-2 border-2 hover:border-primary"
+                      onClick={() => setActiveTab('results')}
+                    >
+                      <Icon name="FileText" size={32} className="text-primary" />
+                      Отчеты и статистика
+                    </Button>
+                  </div>
+                  <div className="pt-4 border-t">
+                    <h3 className="font-semibold mb-2">Статистика платформы:</h3>
+                    <div className="grid gap-2">
+                      <div className="flex justify-between">
+                        <span className="text-muted-foreground">Всего голосований:</span>
+                        <span className="font-medium">{polls.length}</span>
+                      </div>
+                      <div className="flex justify-between">
+                        <span className="text-muted-foreground">Всего голосов:</span>
+                        <span className="font-medium">{polls.reduce((acc, poll) => acc + poll.totalVotes, 0)}</span>
+                      </div>
+                    </div>
+                  </div>
+                </CardContent>
+              </Card>
+            </TabsContent>
+          )}
         </Tabs>
       </main>
+
+      <AuthModal 
+        open={authModalOpen} 
+        onClose={() => setAuthModalOpen(false)}
+        onSuccess={handleAuthSuccess}
+      />
+
+      {currentUser && (
+        <CreatePollModal
+          open={createPollModalOpen}
+          onClose={() => setCreatePollModalOpen(false)}
+          onSuccess={handleCreatePollSuccess}
+          userId={currentUser.id}
+          userRole={currentUser.role}
+        />
+      )}
     </div>
   );
 };
