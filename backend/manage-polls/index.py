@@ -17,7 +17,7 @@ def handler(event: Dict[str, Any], context: Any) -> Dict[str, Any]:
             'statusCode': 200,
             'headers': {
                 'Access-Control-Allow-Origin': '*',
-                'Access-Control-Allow-Methods': 'POST, DELETE, OPTIONS',
+                'Access-Control-Allow-Methods': 'POST, PUT, DELETE, OPTIONS',
                 'Access-Control-Allow-Headers': 'Content-Type, X-User-Id, X-User-Role',
                 'Access-Control-Max-Age': '86400'
             },
@@ -91,6 +91,53 @@ def handler(event: Dict[str, Any], context: Any) -> Dict[str, Any]:
             })
         }
     
+    if method == 'PUT':
+        if user_role != 'owner':
+            cur.close()
+            conn.close()
+            return {
+                'statusCode': 403,
+                'headers': {'Content-Type': 'application/json', 'Access-Control-Allow-Origin': '*'},
+                'body': json.dumps({'error': 'Only owner can change poll status'})
+            }
+        
+        body_data = json.loads(event.get('body', '{}'))
+        poll_id = body_data.get('poll_id')
+        new_status = body_data.get('status')
+        
+        if not poll_id or not new_status:
+            cur.close()
+            conn.close()
+            return {
+                'statusCode': 400,
+                'headers': {'Content-Type': 'application/json', 'Access-Control-Allow-Origin': '*'},
+                'body': json.dumps({'error': 'poll_id and status required'})
+            }
+        
+        if new_status not in ['active', 'closed']:
+            cur.close()
+            conn.close()
+            return {
+                'statusCode': 400,
+                'headers': {'Content-Type': 'application/json', 'Access-Control-Allow-Origin': '*'},
+                'body': json.dumps({'error': 'Invalid status. Use active or closed'})
+            }
+        
+        cur.execute('UPDATE polls SET status = %s WHERE id = %s', (new_status, poll_id))
+        conn.commit()
+        cur.close()
+        conn.close()
+        
+        return {
+            'statusCode': 200,
+            'headers': {'Content-Type': 'application/json', 'Access-Control-Allow-Origin': '*'},
+            'isBase64Encoded': False,
+            'body': json.dumps({
+                'success': True,
+                'message': f'Poll status changed to {new_status}'
+            })
+        }
+    
     if method == 'DELETE':
         if user_role != 'owner':
             cur.close()
@@ -113,19 +160,9 @@ def handler(event: Dict[str, Any], context: Any) -> Dict[str, Any]:
                 'body': json.dumps({'error': 'poll_id required'})
             }
         
-        cur.execute('SELECT id FROM polls WHERE id = %s', (poll_id,))
-        poll = cur.fetchone()
-        
-        if not poll:
-            cur.close()
-            conn.close()
-            return {
-                'statusCode': 404,
-                'headers': {'Content-Type': 'application/json', 'Access-Control-Allow-Origin': '*'},
-                'body': json.dumps({'error': 'Poll not found'})
-            }
-        
-        cur.execute('UPDATE polls SET status = %s WHERE id = %s', ('closed', poll_id))
+        cur.execute('DELETE FROM votes WHERE poll_id = %s', (poll_id,))
+        cur.execute('DELETE FROM poll_options WHERE poll_id = %s', (poll_id,))
+        cur.execute('DELETE FROM polls WHERE id = %s', (poll_id,))
         conn.commit()
         cur.close()
         conn.close()

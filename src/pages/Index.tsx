@@ -29,6 +29,7 @@ interface Poll {
   totalVotes: number;
   created_by?: number;
   created_at?: string;
+  creator?: string;
   creator_name?: string;
 }
 
@@ -83,8 +84,9 @@ const Index = () => {
       const response = await fetch(`https://functions.poehali.dev/0b3cf8f7-e77c-4ff3-9d11-4aae9401ce7c?user_id=${userId}`);
       const data = await response.json();
       
-      if (data.success && data.user_votes) {
-        setUserVotes(data.user_votes);
+      if (data.voted_polls) {
+        const votesArray = data.voted_polls.map((pollId: number) => ({ poll_id: pollId, option_id: 0 }));
+        setUserVotes(votesArray);
       }
     } catch (error) {
       console.error('Failed to load user votes', error);
@@ -98,15 +100,10 @@ const Index = () => {
       const response = await fetch('https://functions.poehali.dev/0b3cf8f7-e77c-4ff3-9d11-4aae9401ce7c');
       const data = await response.json();
       
-      if (data.success && data.polls) {
-        // Transform polls to include totalVotes and format dates
-        const transformedPolls = data.polls.map((poll: any) => ({
-          ...poll,
-          totalVotes: poll.options.reduce((sum: number, opt: PollOption) => sum + opt.votes_count, 0),
-          created_at: poll.created_at || new Date().toISOString(),
-          creator_name: poll.creator_name || 'Пользователь'
-        }));
-        setPolls(transformedPolls);
+      if (Array.isArray(data)) {
+        setPolls(data);
+      } else {
+        setPolls([]);
       }
     } catch (error) {
       toast({
@@ -114,6 +111,7 @@ const Index = () => {
         description: 'Не удалось загрузить голосования',
         variant: 'destructive'
       });
+      setPolls([]);
     } finally {
       setLoading(false);
     }
@@ -465,7 +463,7 @@ const Index = () => {
               <div className="flex items-center gap-4 text-xs text-muted-foreground">
                 <div className="flex items-center gap-1">
                   <Icon name="User" size={14} />
-                  <span>{poll.creator_name}</span>
+                  <span>{poll.creator || poll.creator_name || 'Неизвестно'}</span>
                 </div>
                 <div className="flex items-center gap-1">
                   <Icon name="Calendar" size={14} />
@@ -1068,7 +1066,7 @@ const Index = () => {
                             {polls.map((poll) => (
                               <TableRow key={poll.id}>
                                 <TableCell className="font-medium">{poll.title}</TableCell>
-                                <TableCell>{poll.creator_name}</TableCell>
+                                <TableCell>{poll.creator || poll.creator_name || 'Неизвестно'}</TableCell>
                                 <TableCell>
                                   <Badge 
                                     variant={poll.status === 'active' ? 'default' : 'secondary'}

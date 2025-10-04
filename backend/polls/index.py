@@ -36,12 +36,32 @@ def handler(event: Dict[str, Any], context: Any) -> Dict[str, Any]:
     cur = conn.cursor()
     
     if method == 'GET':
+        query_params = event.get('queryStringParameters', {}) or {}
+        user_id = query_params.get('user_id')
+        
+        if user_id:
+            cur.execute('''
+                SELECT DISTINCT poll_id 
+                FROM votes 
+                WHERE user_id = %s
+            ''', (int(user_id),))
+            user_votes = [row['poll_id'] for row in cur.fetchall()]
+            
+            cur.close()
+            conn.close()
+            
+            return {
+                'statusCode': 200,
+                'headers': {'Content-Type': 'application/json', 'Access-Control-Allow-Origin': '*'},
+                'isBase64Encoded': False,
+                'body': json.dumps({'voted_polls': user_votes})
+            }
+        
         cur.execute('''
-            SELECT p.id, p.title, p.description, p.status, p.created_at,
+            SELECT p.id, p.title, p.description, p.status, p.created_at, p.created_by,
                    u.name as creator_name, u.email as creator_email
             FROM polls p
             JOIN users u ON p.created_by = u.id
-            WHERE p.status = 'active'
             ORDER BY p.created_at DESC
         ''')
         polls = cur.fetchall()
@@ -64,6 +84,8 @@ def handler(event: Dict[str, Any], context: Any) -> Dict[str, Any]:
                 'description': poll['description'],
                 'status': poll['status'],
                 'creator': poll['creator_name'],
+                'created_by': poll['created_by'],
+                'created_at': poll['created_at'].isoformat() if poll['created_at'] else None,
                 'options': [dict(o) for o in options],
                 'totalVotes': total_votes
             })
