@@ -6,7 +6,7 @@
       "path": "/",
       "body": {
         "action": "send_code",
-        "phone": "+79991234567",
+        "email": "test@example.com",
         "name": "Test User"
       },
       "expectedStatus": 200,

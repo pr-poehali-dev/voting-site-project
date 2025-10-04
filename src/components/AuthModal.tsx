@@ -13,8 +13,8 @@ interface AuthModalProps {
 }
 
 export default function AuthModal({ open, onClose, onSuccess }: AuthModalProps) {
-  const [step, setStep] = useState<'phone' | 'code'>('phone');
-  const [phone, setPhone] = useState('');
+  const [step, setStep] = useState<'email' | 'code'>('email');
+  const [email, setEmail] = useState('');
   const [name, setName] = useState('');
   const [code, setCode] = useState('');
   const [loading, setLoading] = useState(false);
@@ -22,10 +22,10 @@ export default function AuthModal({ open, onClose, onSuccess }: AuthModalProps) 
   const { toast } = useToast();
 
   const sendCode = async () => {
-    if (!phone || phone.length < 10) {
+    if (!email || !email.includes('@')) {
       toast({
         title: 'Ошибка',
-        description: 'Введите корректный номер телефона',
+        description: 'Введите корректный email',
         variant: 'destructive'
       });
       return;
@@ -38,7 +38,7 @@ export default function AuthModal({ open, onClose, onSuccess }: AuthModalProps) 
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({
           action: 'send_code',
-          phone: phone.startsWith('+') ? phone : `+${phone}`,
+          email: email.toLowerCase(),
           name
         })
       });
@@ -88,7 +88,7 @@ export default function AuthModal({ open, onClose, onSuccess }: AuthModalProps) 
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({
           action: 'verify_code',
-          phone: phone.startsWith('+') ? phone : `+${phone}`,
+          email: email.toLowerCase(),
           code
         })
       });
@@ -127,16 +127,16 @@ export default function AuthModal({ open, onClose, onSuccess }: AuthModalProps) 
       <DialogContent className="sm:max-w-md">
         <DialogHeader>
           <DialogTitle className="text-2xl bg-gradient-to-r from-primary to-secondary bg-clip-text text-transparent">
-            {step === 'phone' ? 'Вход в систему' : 'Введите код'}
+            {step === 'email' ? 'Вход в систему' : 'Введите код'}
           </DialogTitle>
           <DialogDescription>
-            {step === 'phone' 
-              ? 'Введите номер телефона для получения кода' 
-              : `Код отправлен на ${phone}`}
+            {step === 'email' 
+              ? 'Введите email для получения кода' 
+              : `Код отправлен на ${email}`}
           </DialogDescription>
         </DialogHeader>
 
-        {step === 'phone' ? (
+        {step === 'email' ? (
           <div className="space-y-4">
             <div>
               <Label htmlFor="name">Имя (необязательно)</Label>
@@ -149,12 +149,13 @@ export default function AuthModal({ open, onClose, onSuccess }: AuthModalProps) 
               />
             </div>
             <div>
-              <Label htmlFor="phone">Номер телефона</Label>
+              <Label htmlFor="email">Email</Label>
               <Input
-                id="phone"
-                placeholder="+79991234567"
-                value={phone}
-                onChange={(e) => setPhone(e.target.value)}
+                id="email"
+                type="email"
+                placeholder="your@email.com"
+                value={email}
+                onChange={(e) => setEmail(e.target.value)}
                 className="mt-1"
               />
             </div>
@@ -197,7 +198,7 @@ export default function AuthModal({ open, onClose, onSuccess }: AuthModalProps) 
             <div className="flex gap-2">
               <Button 
                 variant="outline" 
-                onClick={() => setStep('phone')}
+                onClick={() => setStep('email')}
                 className="flex-1"
               >
                 <Icon name="ArrowLeft" className="mr-2 h-4 w-4" />

@@ -8,7 +8,7 @@ from psycopg2.extras import RealDictCursor
 
 def handler(event: Dict[str, Any], context: Any) -> Dict[str, Any]:
     '''
-    Business: Авторизация пользователей по телефону с SMS-кодом
+    Business: Авторизация пользователей по email с кодом подтверждения
     Args: event с httpMethod, body; context с request_id
     Returns: HTTP response с токеном или кодом подтверждения
     '''
@@ -41,37 +41,36 @@ def handler(event: Dict[str, Any], context: Any) -> Dict[str, Any]:
     cur = conn.cursor()
     
     if action == 'send_code':
-        phone = body_data.get('phone', '').strip()
+        email = body_data.get('email', '').strip().lower()
         name = body_data.get('name', '').strip()
         
-        if not phone:
+        if not email or '@' not in email:
             cur.close()
             conn.close()
             return {
                 'statusCode': 400,
                 'headers': {'Content-Type': 'application/json', 'Access-Control-Allow-Origin': '*'},
-                'body': json.dumps({'error': 'Phone number required'})
+                'body': json.dumps({'error': 'Valid email required'})
             }
         
         code = str(random.randint(100000, 999999))
         expires_at = datetime.now() + timedelta(minutes=5)
         
-        cur.execute('SELECT id, name FROM users WHERE phone = %s', (phone,))
+        cur.execute('SELECT id, name FROM users WHERE email = %s', (email,))
         user = cur.fetchone()
         
         if user:
             cur.execute('''
                 UPDATE users 
                 SET verification_code = %s, code_expires_at = %s
-                WHERE phone = %s
-            ''', (code, expires_at, phone))
+                WHERE email = %s
+            ''', (code, expires_at, email))
         else:
-            user_name = name if name else f'User {phone[-4:]}'
-            user_email = f'user_{phone.replace("+", "").replace(" ", "")}@voting.app'
+            user_name = name if name else email.split('@')[0]
             cur.execute('''
-                INSERT INTO users (phone, name, email, verification_code, code_expires_at, role, is_verified)
+                INSERT INTO users (email, name, verification_code, code_expires_at, role, is_verified, email_verified)
                 VALUES (%s, %s, %s, %s, %s, %s, %s)
-            ''', (phone, user_name, user_email, code, expires_at, 'user', False))
+            ''', (email, user_name, code, expires_at, 'user', False, False))
         
         conn.commit()
         cur.close()
@@ -84,28 +83,28 @@ def handler(event: Dict[str, Any], context: Any) -> Dict[str, Any]:
             'body': json.dumps({
                 'success': True,
                 'code': code,
-                'message': f'Code sent to {phone}'
+                'message': f'Code sent to {email}'
             })
         }
     
     if action == 'verify_code':
-        phone = body_data.get('phone', '').strip()
+        email = body_data.get('email', '').strip().lower()
         code = body_data.get('code', '').strip()
         
-        if not phone or not code:
+        if not email or not code:
             cur.close()
             conn.close()
             return {
                 'statusCode': 400,
                 'headers': {'Content-Type': 'application/json', 'Access-Control-Allow-Origin': '*'},
-                'body': json.dumps({'error': 'Phone and code required'})
+                'body': json.dumps({'error': 'Email and code required'})
             }
         
         cur.execute('''
-            SELECT id, name, email, role, verification_code, code_expires_at
+            SELECT id, name, email, role, verification_code, code_expires_at, phone
             FROM users
-            WHERE phone = %s
-        ''', (phone,))
+            WHERE email = %s
+        ''', (email,))
         user = cur.fetchone()
         
         if not user:
@@ -137,7 +136,7 @@ def handler(event: Dict[str, Any], context: Any) -> Dict[str, Any]:
         
         cur.execute('''
             UPDATE users 
-            SET is_verified = TRUE, last_login = %s, verification_code = NULL
+            SET is_verified = TRUE, email_verified = TRUE, last_login = %s, verification_code = NULL
             WHERE id = %s
         ''', (datetime.now(), user['id']))
         conn.commit()
@@ -158,7 +157,7 @@ def handler(event: Dict[str, Any], context: Any) -> Dict[str, Any]:
                     'name': user['name'],
                     'email': user['email'],
                     'role': user['role'],
-                    'phone': phone
+                    'phone': user.get('phone')
                 }
             })
         }
